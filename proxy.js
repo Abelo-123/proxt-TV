@@ -53,18 +53,22 @@ app.use("/proxy", (req, res, next) => {
                 playlist = playlist.replace(/^(?!#)(.+)$/gm, (line) => {
                     // Ignore comments and empty lines
                     if (line.startsWith('#') || !line.trim()) return line;
-                    // If line is already a full URL, rewrite it
                     let baseUrl = req.query.url;
                     let newUrl;
                     try {
                         // If line is absolute URL
                         if (/^https?:\/\//.test(line)) {
                             newUrl = `/proxy?url=${encodeURIComponent(line)}`;
-                        } else {
-                            // Relative URL: resolve against base
+                        } else if (line.startsWith('/')) {
+                            // Absolute path, resolve against origin
                             const urlObj = new URL(baseUrl);
-                            let resolved = new URL(line, urlObj);
-                            newUrl = `/proxy?url=${encodeURIComponent(resolved.toString())}`;
+                            let resolved = `${urlObj.protocol}//${urlObj.host}${line}`;
+                            newUrl = `/proxy?url=${encodeURIComponent(resolved)}`;
+                        } else {
+                            // Relative path, resolve against base
+                            const urlObj = new URL(baseUrl);
+                            let resolved = new URL(line, urlObj).toString();
+                            newUrl = `/proxy?url=${encodeURIComponent(resolved)}`;
                         }
                         return newUrl;
                     } catch (e) {
