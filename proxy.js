@@ -144,12 +144,13 @@ app.get("/epg", async (req, res) => {
     }
 });
 
-// Catch direct manifest/segment requests and redirect to proxy
-app.get('/manifest/*', (req, res) => {
-    // You may need to adjust the base URL to match your stream host
+// Proxy direct manifest/segment requests to upstream host
+app.use('/manifest', (req, res, next) => {
     const baseStreamHost = 'https://shd-gcp-live.edgenextcdn.net';
     const fullUrl = `${baseStreamHost}${req.originalUrl}`;
-    res.redirect(`/proxy?url=${encodeURIComponent(fullUrl)}`);
+    req.query.url = fullUrl;
+    // Forward to the /proxy logic
+    app._router.handle(req, res, next);
 });
 
 
