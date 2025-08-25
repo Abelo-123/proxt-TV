@@ -159,7 +159,7 @@ app.get("/epg", async (req, res) => {
 // Add a fallback 404 handler at the end to clarify missing resources
 app.use((req, res) => {
     res.setHeader("Access-Control-Allow-Origin", "*");
-    res.status(404).send("Not Found: This resource does not exist on the proxy.");
+    res.status(404).send("Not Found: Use /proxy?url=... for all stream segments and playlists.");
 });
 
 
