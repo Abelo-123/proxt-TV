@@ -9,13 +9,17 @@ import https from "https";
 const app = express();
 const PORT = 8080;
 
-app.use(cors());
-
-// Add CORS headers for all responses (including proxied streams)
+// Move CORS middleware to the very top, before any other middleware or routes
 app.use((req, res, next) => {
-    res.header("Access-Control-Allow-Origin", "*");
-    res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
-    next();
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
+    res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
+    // Handle preflight requests
+    if (req.method === "OPTIONS") {
+        res.sendStatus(200);
+    } else {
+        next();
+    }
 });
 
 // Generic stream proxy: /proxy?url=https://...
