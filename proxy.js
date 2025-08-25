@@ -11,6 +11,13 @@ const PORT = 8080;
 
 app.use(cors());
 
+// Add CORS headers for all responses (including proxied streams)
+app.use((req, res, next) => {
+    res.header("Access-Control-Allow-Origin", "*");
+    res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
+    next();
+});
+
 // Generic stream proxy: /proxy?url=https://...
 app.get("/proxy", async (req, res) => {
     const targetUrl = req.query.url;
