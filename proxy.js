@@ -56,7 +56,39 @@ app.get("/proxy", async (req, res) => {
             Object.entries(proxyRes.headers).forEach(([key, value]) => {
                 res.setHeader(key, value);
             });
-            proxyRes.pipe(res);
+
+            // If .m3u8 playlist, rewrite all URLs to go through /proxy?url=...
+            if (targetUrl.endsWith('.m3u8')) {
+                let data = '';
+                proxyRes.on('data', chunk => data += chunk);
+                proxyRes.on('end', () => {
+                    const baseUrl = targetUrl;
+                    const rewritten = data.replace(/^(?!#)(.+)$/gm, (line) => {
+                        if (line.startsWith('#') || !line.trim()) return line;
+                        let newUrl;
+                        try {
+                            if (/^https?:\/\//.test(line)) {
+                                newUrl = `/proxy?url=${encodeURIComponent(line)}`;
+                            } else if (line.startsWith('/')) {
+                                const urlObj = new URL(baseUrl);
+                                let resolved = `${urlObj.protocol}//${urlObj.host}${line}`;
+                                newUrl = `/proxy?url=${encodeURIComponent(resolved)}`;
+                            } else {
+                                const urlObj = new URL(baseUrl);
+                                let resolved = new URL(line, urlObj).toString();
+                                newUrl = `/proxy?url=${encodeURIComponent(resolved)}`;
+                            }
+                            return newUrl;
+                        } catch (e) {
+                            return line;
+                        }
+                    });
+                    res.setHeader('content-type', 'application/vnd.apple.mpegurl');
+                    res.end(rewritten);
+                });
+            } else {
+                proxyRes.pipe(res);
+            }
         }).on("error", (err) => {
             console.error("Streaming proxy error:", err);
             res.status(500).send("Streaming proxy failed");
@@ -124,58 +156,8 @@ app.get("/epg", async (req, res) => {
     }
 });
 
-// Remove the manifest handler and handle everything via /proxy
-// Remove this block:
-// app.get('/manifest/*', ...);
-
-// Add a catch-all proxy for all requests except /epg and /proxy
-app.use((req, res, next) => {
-    // Ignore /epg and /proxy routes
-    if (req.path.startsWith('/epg') || req.path.startsWith('/proxy')) return next();
-
-    // Attempt to reconstruct the upstream URL for manifest/segment requests
-    const baseStreamHost = 'https://shd-gcp-live.edgenextcdn.net';
-    const fullUrl = `${baseStreamHost}${req.originalUrl}`;
-    console.log('Catch-all streaming proxy:', fullUrl);
-
-    try {
-        const urlObj = new URL(fullUrl);
-        const client = urlObj.protocol === "https:" ? https : http;
-
-        const options = {
-            method: "GET",
-            headers: {
-                "Host": urlObj.host,
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-                "Accept": "*/*",
-                "Connection": "keep-alive",
-                "Referer": "https://www.shahid.net/",
-                "Origin": "https://www.shahid.net"
-            }
-        };
-        if (req.headers.cookie) {
-            options.headers["Cookie"] = req.headers.cookie;
-        }
-
-        client.get(fullUrl, options, (proxyRes) => {
-            res.status(proxyRes.statusCode);
-            Object.entries(proxyRes.headers).forEach(([key, value]) => {
-                res.setHeader(key, value);
-            });
-            proxyRes.pipe(res);
-        }).on("error", (err) => {
-            console.error("Catch-all streaming proxy error:", err);
-            res.status(500).send("Catch-all streaming proxy failed");
-        });
-    } catch (err) {
-        console.error("Catch-all proxy setup error:", err);
-        res.status(500).send("Catch-all proxy setup failed");
-    }
-});
-
 // Add a fallback 404 handler at the end to clarify missing resources
 app.use((req, res) => {
-    // If the catch-all proxy did not handle the request, return a clear 404
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.status(404).send("Not Found: This resource does not exist on the proxy.");
 });
