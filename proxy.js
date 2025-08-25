@@ -24,19 +24,25 @@ app.use("/proxy", (req, res, next) => {
             return "https://tvpass.org";
         }
     })(), {
-        proxyReqPathResolver: () => {
+        proxyReqPathResolver: (req) => {
+            // Forward the full path and query string from the original URL
             const url = new URL(req.query.url);
             return url.pathname + url.search;
         },
         proxyReqOptDecorator: (proxyReqOpts, srcReq) => {
-            // Add custom headers for edgenextcdn.net streams
+            // Always set custom headers for edgenextcdn.net
             if (targetUrl.includes("edgenextcdn.net")) {
                 proxyReqOpts.headers['Referer'] = "https://www.shahid.net/";
                 proxyReqOpts.headers['User-Agent'] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
                 proxyReqOpts.headers['Origin'] = "https://www.shahid.net";
+                // Forward cookies if present
+                if (srcReq.headers.cookie) {
+                    proxyReqOpts.headers['Cookie'] = srcReq.headers.cookie;
+                }
             }
             return proxyReqOpts;
         },
+        preserveHostHdr: true,
         proxyErrorHandler(err, res, next) {
             console.error("Stream proxy error:", err);
             res.status(500).send("Stream proxy failed");
