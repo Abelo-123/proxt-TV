@@ -14,7 +14,6 @@ app.use(cors());
 app.use("/proxy", (req, res, next) => {
     const targetUrl = req.query.url;
     if (!targetUrl) return res.status(400).send("Missing url param");
-    console.log('Proxying:', targetUrl);
 
     proxy((() => {
         try {
@@ -34,7 +33,6 @@ app.use("/proxy", (req, res, next) => {
             if (streamUrl) {
                 const urlObj = new URL(streamUrl);
                 proxyReqOpts.headers['Host'] = urlObj.host;
-                // Always set custom headers for edgenextcdn.net (main, audio, subs, segments)
                 if (streamUrl.includes("edgenextcdn.net")) {
                     proxyReqOpts.headers['Referer'] = "https://www.shahid.net/";
                     proxyReqOpts.headers['User-Agent'] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
@@ -44,36 +42,32 @@ app.use("/proxy", (req, res, next) => {
                     }
                 }
             }
-            // Log outgoing headers for debugging
-            console.log('Proxy headers:', proxyReqOpts.headers);
             return proxyReqOpts;
         },
         preserveHostHdr: true,
         userResDecorator: function (proxyRes, proxyResData, req, res) {
-            // Log response status for debugging
-            console.log('Proxy response status:', proxyRes.statusCode, req.query.url);
             // Only rewrite .m3u8 playlists
             if (req.query.url && req.query.url.endsWith('.m3u8')) {
                 let playlist = proxyResData.toString('utf8');
+                // Rewrite all relative/absolute URLs to go through the proxy
                 playlist = playlist.replace(/^(?!#)(.+)$/gm, (line) => {
+                    // Ignore comments and empty lines
                     if (line.startsWith('#') || !line.trim()) return line;
+                    // If line is already a full URL, rewrite it
                     let baseUrl = req.query.url;
                     let newUrl;
                     try {
+                        // If line is absolute URL
                         if (/^https?:\/\//.test(line)) {
                             newUrl = `/proxy?url=${encodeURIComponent(line)}`;
-                        } else if (line.startsWith('/')) {
-                            const urlObj = new URL(baseUrl);
-                            let resolved = `${urlObj.protocol}//${urlObj.host}${line}`;
-                            newUrl = `/proxy?url=${encodeURIComponent(resolved)}`;
                         } else {
+                            // Relative URL: resolve against base
                             const urlObj = new URL(baseUrl);
-                            let resolved = new URL(line, urlObj).toString();
-                            newUrl = `/proxy?url=${encodeURIComponent(resolved)}`;
+                            let resolved = new URL(line, urlObj);
+                            newUrl = `/proxy?url=${encodeURIComponent(resolved.toString())}`;
                         }
                         return newUrl;
                     } catch (e) {
-                        console.error('Playlist rewrite error:', e, line);
                         return line;
                     }
                 });
@@ -146,43 +140,6 @@ app.get("/epg", async (req, res) => {
     }
 });
 
-// Fallback for direct /manifest requests (debugging aid)
-app.get('/manifest/*', (req, res, next) => {
-    console.warn('Direct /manifest request detected:', req.originalUrl);
-    const baseStreamHost = 'https://shd-gcp-live.edgenextcdn.net';
-    const fullUrl = `${baseStreamHost}${req.originalUrl}`;
-    // Use a fresh proxy call instead of app._router.handle to avoid middleware issues
-    proxy((() => {
-        try {
-            const url = new URL(fullUrl);
-            return `${url.protocol}//${url.host}`;
-        } catch (err) {
-            console.warn("Invalid stream URL. Falling back to tvpass.org");
-            return "https://tvpass.org";
-        }
-    })(), {
-        proxyReqPathResolver: () => {
-            const url = new URL(fullUrl);
-            return url.pathname + url.search;
-        },
-        proxyReqOptDecorator: (proxyReqOpts, srcReq) => {
-            proxyReqOpts.headers['Host'] = 'shd-gcp-live.edgenextcdn.net';
-            proxyReqOpts.headers['Referer'] = "https://www.shahid.net/";
-            proxyReqOpts.headers['User-Agent'] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
-            proxyReqOpts.headers['Origin'] = "https://www.shahid.net";
-            if (srcReq.headers.cookie) {
-                proxyReqOpts.headers['Cookie'] = srcReq.headers.cookie;
-            }
-            return proxyReqOpts;
-        },
-        preserveHostHdr: true,
-        proxyErrorHandler(err, res, next) {
-            console.error("Stream proxy error (manifest):", err);
-            res.status(500).send("Stream proxy failed (manifest)");
-        },
-    })(req, res, next);
-});
-
 
 
 app.listen(PORT, () => {
@@ -190,6 +147,3 @@ app.listen(PORT, () => {
     console.log("🔁 Stream proxy:  /proxy?url=...");
     console.log("📅 EPG XML proxy: /epg?url=...");
 });
-console.log("📅 EPG XML proxy: /epg?url=...");
-console.log("📅 EPG JSON proxy: /epg?channel=...&format=json");
-console.log("🚫 Direct /manifest requests are blocked. Use /proxy?url=...");
