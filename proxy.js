@@ -25,14 +25,17 @@ app.use("/proxy", (req, res, next) => {
         }
     })(), {
         proxyReqPathResolver: (req) => {
+            // Forward the full path and query string from the original URL
             const url = new URL(req.query.url);
             return url.pathname + url.search;
         },
         proxyReqOptDecorator: (proxyReqOpts, srcReq) => {
+            // Always set custom headers for edgenextcdn.net
             if (targetUrl.includes("edgenextcdn.net")) {
                 proxyReqOpts.headers['Referer'] = "https://www.shahid.net/";
                 proxyReqOpts.headers['User-Agent'] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
                 proxyReqOpts.headers['Origin'] = "https://www.shahid.net";
+                // Forward cookies if present
                 if (srcReq.headers.cookie) {
                     proxyReqOpts.headers['Cookie'] = srcReq.headers.cookie;
                 }
@@ -40,37 +43,6 @@ app.use("/proxy", (req, res, next) => {
             return proxyReqOpts;
         },
         preserveHostHdr: true,
-        userResDecorator: function (proxyRes, proxyResData, req, res) {
-            // Only rewrite .m3u8 playlists
-            if (req.query.url && req.query.url.endsWith('.m3u8')) {
-                let playlist = proxyResData.toString('utf8');
-                // Rewrite all relative/absolute URLs to go through the proxy
-                playlist = playlist.replace(/^(?!#)(.+)$/gm, (line) => {
-                    // Ignore comments and empty lines
-                    if (line.startsWith('#') || !line.trim()) return line;
-                    // If line is already a full URL, rewrite it
-                    let baseUrl = req.query.url;
-                    let newUrl;
-                    try {
-                        // If line is absolute URL
-                        if (/^https?:\/\//.test(line)) {
-                            newUrl = `/proxy?url=${encodeURIComponent(line)}`;
-                        } else {
-                            // Relative URL: resolve against base
-                            const urlObj = new URL(baseUrl);
-                            let resolved = new URL(line, urlObj);
-                            newUrl = `/proxy?url=${encodeURIComponent(resolved.toString())}`;
-                        }
-                        return newUrl;
-                    } catch (e) {
-                        return line;
-                    }
-                });
-                res.setHeader('content-type', 'application/vnd.apple.mpegurl');
-                return playlist;
-            }
-            return proxyResData;
-        },
         proxyErrorHandler(err, res, next) {
             console.error("Stream proxy error:", err);
             res.status(500).send("Stream proxy failed");
