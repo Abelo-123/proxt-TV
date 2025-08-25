@@ -149,7 +149,12 @@ app.get("/epg", async (req, res) => {
 // Fallback for direct /manifest requests (debugging aid)
 app.get('/manifest/*', (req, res) => {
     console.warn('Direct /manifest request detected:', req.originalUrl);
-    res.status(404).send('Manifest/segment requests must go through /proxy?url=...');
+    // Instead of 404, proxy this request to the upstream host
+    const baseStreamHost = 'https://shd-gcp-live.edgenextcdn.net';
+    const fullUrl = `${baseStreamHost}${req.originalUrl}`;
+    req.query.url = fullUrl;
+    // Forward to the /proxy logic
+    app._router.handle(req, res, () => { });
 });
 
 
