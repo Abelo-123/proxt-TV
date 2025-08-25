@@ -147,14 +147,40 @@ app.get("/epg", async (req, res) => {
 });
 
 // Fallback for direct /manifest requests (debugging aid)
-app.get('/manifest/*', (req, res) => {
+app.get('/manifest/*', (req, res, next) => {
     console.warn('Direct /manifest request detected:', req.originalUrl);
-    // Instead of 404, proxy this request to the upstream host
     const baseStreamHost = 'https://shd-gcp-live.edgenextcdn.net';
     const fullUrl = `${baseStreamHost}${req.originalUrl}`;
-    req.query.url = fullUrl;
-    // Forward to the /proxy logic
-    app._router.handle(req, res, () => { });
+    // Use a fresh proxy call instead of app._router.handle to avoid middleware issues
+    proxy((() => {
+        try {
+            const url = new URL(fullUrl);
+            return `${url.protocol}//${url.host}`;
+        } catch (err) {
+            console.warn("Invalid stream URL. Falling back to tvpass.org");
+            return "https://tvpass.org";
+        }
+    })(), {
+        proxyReqPathResolver: () => {
+            const url = new URL(fullUrl);
+            return url.pathname + url.search;
+        },
+        proxyReqOptDecorator: (proxyReqOpts, srcReq) => {
+            proxyReqOpts.headers['Host'] = 'shd-gcp-live.edgenextcdn.net';
+            proxyReqOpts.headers['Referer'] = "https://www.shahid.net/";
+            proxyReqOpts.headers['User-Agent'] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
+            proxyReqOpts.headers['Origin'] = "https://www.shahid.net";
+            if (srcReq.headers.cookie) {
+                proxyReqOpts.headers['Cookie'] = srcReq.headers.cookie;
+            }
+            return proxyReqOpts;
+        },
+        preserveHostHdr: true,
+        proxyErrorHandler(err, res, next) {
+            console.error("Stream proxy error (manifest):", err);
+            res.status(500).send("Stream proxy failed (manifest)");
+        },
+    })(req, res, next);
 });
 
 
