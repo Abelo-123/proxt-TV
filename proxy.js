@@ -14,6 +14,7 @@ app.use(cors());
 app.use("/proxy", (req, res, next) => {
     const targetUrl = req.query.url;
     if (!targetUrl) return res.status(400).send("Missing url param");
+    console.log('Proxying:', targetUrl);
 
     proxy((() => {
         try {
@@ -144,13 +145,10 @@ app.get("/epg", async (req, res) => {
     }
 });
 
-// Proxy direct manifest/segment requests to upstream host
-app.use('/manifest', (req, res, next) => {
-    const baseStreamHost = 'https://shd-gcp-live.edgenextcdn.net';
-    const fullUrl = `${baseStreamHost}${req.originalUrl}`;
-    req.query.url = fullUrl;
-    // Forward to the /proxy logic
-    app._router.handle(req, res, next);
+// Fallback for direct /manifest requests (debugging aid)
+app.get('/manifest/*', (req, res) => {
+    console.warn('Direct /manifest request detected:', req.originalUrl);
+    res.status(404).send('Manifest/segment requests must go through /proxy?url=...');
 });
 
 
@@ -160,3 +158,5 @@ app.listen(PORT, () => {
     console.log("🔁 Stream proxy:  /proxy?url=...");
     console.log("📅 EPG XML proxy: /epg?url=...");
 });
+console.log("📅 EPG XML proxy: /epg?url=...");
+console.log("📅 EPG JSON proxy: /epg?channel=...&format=json");
