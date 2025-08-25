@@ -173,6 +173,12 @@ app.use((req, res, next) => {
     }
 });
 
+// Add a fallback 404 handler at the end to clarify missing resources
+app.use((req, res) => {
+    // If the catch-all proxy did not handle the request, return a clear 404
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.status(404).send("Not Found: This resource does not exist on the proxy.");
+});
 
 
 app.listen(PORT, () => {
