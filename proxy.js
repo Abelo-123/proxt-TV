@@ -29,9 +29,7 @@ app.use("/proxy", (req, res, next) => {
             return url.pathname + url.search;
         },
         proxyReqOptDecorator: (proxyReqOpts, srcReq) => {
-            // Use srcReq.query.url instead of targetUrl
-            const streamUrl = srcReq.query.url;
-            if (streamUrl && streamUrl.includes("edgenextcdn.net")) {
+            if (targetUrl.includes("edgenextcdn.net")) {
                 proxyReqOpts.headers['Referer'] = "https://www.shahid.net/";
                 proxyReqOpts.headers['User-Agent'] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
                 proxyReqOpts.headers['Origin'] = "https://www.shahid.net";
