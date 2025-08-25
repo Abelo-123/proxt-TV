@@ -34,6 +34,7 @@ app.use("/proxy", (req, res, next) => {
             if (streamUrl) {
                 const urlObj = new URL(streamUrl);
                 proxyReqOpts.headers['Host'] = urlObj.host;
+                // Always set custom headers for edgenextcdn.net (main, audio, subs, segments)
                 if (streamUrl.includes("edgenextcdn.net")) {
                     proxyReqOpts.headers['Referer'] = "https://www.shahid.net/";
                     proxyReqOpts.headers['User-Agent'] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
@@ -43,36 +44,36 @@ app.use("/proxy", (req, res, next) => {
                     }
                 }
             }
+            // Log outgoing headers for debugging
+            console.log('Proxy headers:', proxyReqOpts.headers);
             return proxyReqOpts;
         },
         preserveHostHdr: true,
         userResDecorator: function (proxyRes, proxyResData, req, res) {
+            // Log response status for debugging
+            console.log('Proxy response status:', proxyRes.statusCode, req.query.url);
             // Only rewrite .m3u8 playlists
             if (req.query.url && req.query.url.endsWith('.m3u8')) {
                 let playlist = proxyResData.toString('utf8');
-                // Rewrite all relative/absolute URLs to go through the proxy
                 playlist = playlist.replace(/^(?!#)(.+)$/gm, (line) => {
-                    // Ignore comments and empty lines
                     if (line.startsWith('#') || !line.trim()) return line;
                     let baseUrl = req.query.url;
                     let newUrl;
                     try {
-                        // If line is absolute URL
                         if (/^https?:\/\//.test(line)) {
                             newUrl = `/proxy?url=${encodeURIComponent(line)}`;
                         } else if (line.startsWith('/')) {
-                            // Absolute path, resolve against origin
                             const urlObj = new URL(baseUrl);
                             let resolved = `${urlObj.protocol}//${urlObj.host}${line}`;
                             newUrl = `/proxy?url=${encodeURIComponent(resolved)}`;
                         } else {
-                            // Relative path, resolve against base
                             const urlObj = new URL(baseUrl);
                             let resolved = new URL(line, urlObj).toString();
                             newUrl = `/proxy?url=${encodeURIComponent(resolved)}`;
                         }
                         return newUrl;
                     } catch (e) {
+                        console.error('Playlist rewrite error:', e, line);
                         return line;
                     }
                 });
@@ -160,3 +161,4 @@ app.listen(PORT, () => {
 });
 console.log("📅 EPG XML proxy: /epg?url=...");
 console.log("📅 EPG JSON proxy: /epg?channel=...&format=json");
+console.log("🚫 Direct /manifest requests are blocked. Use /proxy?url=...");
