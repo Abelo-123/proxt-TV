@@ -1,9 +1,10 @@
 // proxy.js (stream-safe + dynamic EPG support)
 import express from "express";
 import cors from "cors";
-import proxy from "express-http-proxy";
 import axios from "axios";
 import { parseStringPromise, Builder } from "xml2js";
+import http from "http";
+import https from "https";
 
 const app = express();
 const PORT = 8080;
@@ -11,82 +12,48 @@ const PORT = 8080;
 app.use(cors());
 
 // Generic stream proxy: /proxy?url=https://...
-app.use("/proxy", (req, res, next) => {
+app.get("/proxy", async (req, res) => {
     const targetUrl = req.query.url;
     if (!targetUrl) return res.status(400).send("Missing url param");
-    console.log('Proxying:', targetUrl);
+    console.log('Streaming proxy:', targetUrl);
 
-    proxy((() => {
-        try {
-            const url = new URL(targetUrl);
-            return `${url.protocol}//${url.host}`;
-        } catch (err) {
-            console.warn("Invalid stream URL. Falling back to tvpass.org");
-            return "https://tvpass.org";
+    try {
+        const urlObj = new URL(targetUrl);
+        const client = urlObj.protocol === "https:" ? https : http;
+
+        const options = {
+            method: "GET",
+            headers: {
+                "Host": urlObj.host,
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                "Accept": "*/*",
+                "Connection": "keep-alive",
+            }
+        };
+
+        // Add anti-bot headers for edgenextcdn.net
+        if (targetUrl.includes("edgenextcdn.net")) {
+            options.headers["Referer"] = "https://www.shahid.net/";
+            options.headers["Origin"] = "https://www.shahid.net";
         }
-    })(), {
-        proxyReqPathResolver: (req) => {
-            const url = new URL(req.query.url);
-            return url.pathname + url.search;
-        },
-        proxyReqOptDecorator: (proxyReqOpts, srcReq) => {
-            const streamUrl = srcReq.query.url;
-            if (streamUrl) {
-                const urlObj = new URL(streamUrl);
-                proxyReqOpts.headers['Host'] = urlObj.host;
-                // Always set custom headers for edgenextcdn.net (main, audio, subs, segments)
-                if (streamUrl.includes("edgenextcdn.net")) {
-                    proxyReqOpts.headers['Referer'] = "https://www.shahid.net/";
-                    proxyReqOpts.headers['User-Agent'] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
-                    proxyReqOpts.headers['Origin'] = "https://www.shahid.net";
-                    if (srcReq.headers.cookie) {
-                        proxyReqOpts.headers['Cookie'] = srcReq.headers.cookie;
-                    }
-                }
-            }
-            // Log outgoing headers for debugging
-            console.log('Proxy headers:', proxyReqOpts.headers);
-            return proxyReqOpts;
-        },
-        preserveHostHdr: true,
-        userResDecorator: function (proxyRes, proxyResData, req, res) {
-            // Log response status for debugging
-            console.log('Proxy response status:', proxyRes.statusCode, req.query.url);
-            // Only rewrite .m3u8 playlists
-            if (req.query.url && req.query.url.endsWith('.m3u8')) {
-                let playlist = proxyResData.toString('utf8');
-                playlist = playlist.replace(/^(?!#)(.+)$/gm, (line) => {
-                    if (line.startsWith('#') || !line.trim()) return line;
-                    let baseUrl = req.query.url;
-                    let newUrl;
-                    try {
-                        if (/^https?:\/\//.test(line)) {
-                            newUrl = `/proxy?url=${encodeURIComponent(line)}`;
-                        } else if (line.startsWith('/')) {
-                            const urlObj = new URL(baseUrl);
-                            let resolved = `${urlObj.protocol}//${urlObj.host}${line}`;
-                            newUrl = `/proxy?url=${encodeURIComponent(resolved)}`;
-                        } else {
-                            const urlObj = new URL(baseUrl);
-                            let resolved = new URL(line, urlObj).toString();
-                            newUrl = `/proxy?url=${encodeURIComponent(resolved)}`;
-                        }
-                        return newUrl;
-                    } catch (e) {
-                        console.error('Playlist rewrite error:', e, line);
-                        return line;
-                    }
-                });
-                res.setHeader('content-type', 'application/vnd.apple.mpegurl');
-                return playlist;
-            }
-            return proxyResData;
-        },
-        proxyErrorHandler(err, res, next) {
-            console.error("Stream proxy error:", err);
-            res.status(500).send("Stream proxy failed");
-        },
-    })(req, res, next);
+        if (req.headers.cookie) {
+            options.headers["Cookie"] = req.headers.cookie;
+        }
+
+        client.get(targetUrl, options, (proxyRes) => {
+            res.status(proxyRes.statusCode);
+            Object.entries(proxyRes.headers).forEach(([key, value]) => {
+                res.setHeader(key, value);
+            });
+            proxyRes.pipe(res);
+        }).on("error", (err) => {
+            console.error("Streaming proxy error:", err);
+            res.status(500).send("Streaming proxy failed");
+        });
+    } catch (err) {
+        console.error("Proxy setup error:", err);
+        res.status(500).send("Proxy setup failed");
+    }
 });
 
 // Dynamic EPG proxy: /epg?url=https://...
