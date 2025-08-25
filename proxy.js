@@ -113,41 +113,53 @@ app.get("/epg", async (req, res) => {
     }
 });
 
-// Fallback for direct /manifest requests (debugging aid)
-app.get('/manifest/*', (req, res, next) => {
-    console.warn('Direct /manifest request detected:', req.originalUrl);
+// Remove the manifest handler and handle everything via /proxy
+// Remove this block:
+// app.get('/manifest/*', ...);
+
+// Add a catch-all proxy for all requests except /epg and /proxy
+app.use((req, res, next) => {
+    // Ignore /epg and /proxy routes
+    if (req.path.startsWith('/epg') || req.path.startsWith('/proxy')) return next();
+
+    // Attempt to reconstruct the upstream URL for manifest/segment requests
     const baseStreamHost = 'https://shd-gcp-live.edgenextcdn.net';
     const fullUrl = `${baseStreamHost}${req.originalUrl}`;
-    // Use a fresh proxy call instead of app._router.handle to avoid middleware issues
-    proxy((() => {
-        try {
-            const url = new URL(fullUrl);
-            return `${url.protocol}//${url.host}`;
-        } catch (err) {
-            console.warn("Invalid stream URL. Falling back to tvpass.org");
-            return "https://tvpass.org";
-        }
-    })(), {
-        proxyReqPathResolver: () => {
-            const url = new URL(fullUrl);
-            return url.pathname + url.search;
-        },
-        proxyReqOptDecorator: (proxyReqOpts, srcReq) => {
-            proxyReqOpts.headers['Host'] = 'shd-gcp-live.edgenextcdn.net';
-            proxyReqOpts.headers['Referer'] = "https://www.shahid.net/";
-            proxyReqOpts.headers['User-Agent'] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
-            proxyReqOpts.headers['Origin'] = "https://www.shahid.net";
-            if (srcReq.headers.cookie) {
-                proxyReqOpts.headers['Cookie'] = srcReq.headers.cookie;
+    console.log('Catch-all streaming proxy:', fullUrl);
+
+    try {
+        const urlObj = new URL(fullUrl);
+        const client = urlObj.protocol === "https:" ? https : http;
+
+        const options = {
+            method: "GET",
+            headers: {
+                "Host": urlObj.host,
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                "Accept": "*/*",
+                "Connection": "keep-alive",
+                "Referer": "https://www.shahid.net/",
+                "Origin": "https://www.shahid.net"
             }
-            return proxyReqOpts;
-        },
-        preserveHostHdr: true,
-        proxyErrorHandler(err, res, next) {
-            console.error("Stream proxy error (manifest):", err);
-            res.status(500).send("Stream proxy failed (manifest)");
-        },
-    })(req, res, next);
+        };
+        if (req.headers.cookie) {
+            options.headers["Cookie"] = req.headers.cookie;
+        }
+
+        client.get(fullUrl, options, (proxyRes) => {
+            res.status(proxyRes.statusCode);
+            Object.entries(proxyRes.headers).forEach(([key, value]) => {
+                res.setHeader(key, value);
+            });
+            proxyRes.pipe(res);
+        }).on("error", (err) => {
+            console.error("Catch-all streaming proxy error:", err);
+            res.status(500).send("Catch-all streaming proxy failed");
+        });
+    } catch (err) {
+        console.error("Catch-all proxy setup error:", err);
+        res.status(500).send("Catch-all proxy setup failed");
+    }
 });
 
 
