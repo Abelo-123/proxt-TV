@@ -29,12 +29,17 @@ app.use("/proxy", (req, res, next) => {
             return url.pathname + url.search;
         },
         proxyReqOptDecorator: (proxyReqOpts, srcReq) => {
-            if (targetUrl.includes("edgenextcdn.net")) {
-                proxyReqOpts.headers['Referer'] = "https://www.shahid.net/";
-                proxyReqOpts.headers['User-Agent'] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
-                proxyReqOpts.headers['Origin'] = "https://www.shahid.net";
-                if (srcReq.headers.cookie) {
-                    proxyReqOpts.headers['Cookie'] = srcReq.headers.cookie;
+            const streamUrl = srcReq.query.url;
+            if (streamUrl) {
+                const urlObj = new URL(streamUrl);
+                proxyReqOpts.headers['Host'] = urlObj.host;
+                if (streamUrl.includes("edgenextcdn.net")) {
+                    proxyReqOpts.headers['Referer'] = "https://www.shahid.net/";
+                    proxyReqOpts.headers['User-Agent'] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
+                    proxyReqOpts.headers['Origin'] = "https://www.shahid.net";
+                    if (srcReq.headers.cookie) {
+                        proxyReqOpts.headers['Cookie'] = srcReq.headers.cookie;
+                    }
                 }
             }
             return proxyReqOpts;
@@ -48,18 +53,22 @@ app.use("/proxy", (req, res, next) => {
                 playlist = playlist.replace(/^(?!#)(.+)$/gm, (line) => {
                     // Ignore comments and empty lines
                     if (line.startsWith('#') || !line.trim()) return line;
-                    // If line is already a full URL, rewrite it
                     let baseUrl = req.query.url;
                     let newUrl;
                     try {
                         // If line is absolute URL
                         if (/^https?:\/\//.test(line)) {
                             newUrl = `/proxy?url=${encodeURIComponent(line)}`;
-                        } else {
-                            // Relative URL: resolve against base
+                        } else if (line.startsWith('/')) {
+                            // Absolute path, resolve against origin
                             const urlObj = new URL(baseUrl);
-                            let resolved = new URL(line, urlObj);
-                            newUrl = `/proxy?url=${encodeURIComponent(resolved.toString())}`;
+                            let resolved = `${urlObj.protocol}//${urlObj.host}${line}`;
+                            newUrl = `/proxy?url=${encodeURIComponent(resolved)}`;
+                        } else {
+                            // Relative path, resolve against base
+                            const urlObj = new URL(baseUrl);
+                            let resolved = new URL(line, urlObj).toString();
+                            newUrl = `/proxy?url=${encodeURIComponent(resolved)}`;
                         }
                         return newUrl;
                     } catch (e) {
@@ -133,6 +142,15 @@ app.get("/epg", async (req, res) => {
         console.error("❌ EPG fetch/filter error:", err.message);
         res.status(500).send("Failed to fetch or parse EPG");
     }
+});
+
+// Proxy direct manifest/segment requests to upstream host
+app.use('/manifest', (req, res, next) => {
+    const baseStreamHost = 'https://shd-gcp-live.edgenextcdn.net';
+    const fullUrl = `${baseStreamHost}${req.originalUrl}`;
+    req.query.url = fullUrl;
+    // Forward to the /proxy logic
+    app._router.handle(req, res, next);
 });
 
 
